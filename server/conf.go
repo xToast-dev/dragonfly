@@ -6,27 +6,28 @@ import (
 	"github.com/df-mc/dragonfly/server/entity"
 	"github.com/df-mc/dragonfly/server/internal/packbuilder"
 	"github.com/df-mc/dragonfly/server/player"
+	"github.com/df-mc/dragonfly/server/player/chat"
 	"github.com/df-mc/dragonfly/server/player/playerdb"
-	"github.com/df-mc/dragonfly/server/session"
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/biome"
 	"github.com/df-mc/dragonfly/server/world/generator"
 	"github.com/df-mc/dragonfly/server/world/mcdb"
 	"github.com/google/uuid"
+	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/resource"
-	"github.com/sirupsen/logrus"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
+	_ "unsafe"
 )
 
 // Config contains options for starting a Minecraft server.
 type Config struct {
-	// Log is the Logger to use for logging information. If the Logger is a
-	// logrus.Logger, additional fields may be added to it for individual worlds
-	// to provide additional context. If left empty, Log will be set to a logger
-	// created with logrus.New().
-	Log Logger
+	// Log is the Logger to use for logging information. If nil, Log is set to
+	// slog.Default(). Errors reported by the underlying network are only logged
+	// if Log has at least debug level.
+	Log *slog.Logger
 	// Listeners is a list of functions to create a Listener using a Config, one
 	// for each Listener to be added to the Server. If left empty, no players
 	// will be able to connect to the Server.
@@ -64,10 +65,15 @@ type Config struct {
 	MaxChunkRadius int
 	// JoinMessage, QuitMessage and ShutdownMessage are the messages to send for
 	// when a player joins or quits the server and when the server shuts down,
-	// kicking all online players. JoinMessage and QuitMessage may have a '%v'
-	// argument, which will be replaced with the name of the player joining or
-	// quitting.
-	JoinMessage, QuitMessage, ShutdownMessage string
+	// kicking all online players. If set, JoinMessage and QuitMessage must have
+	// exactly 1 argument, which will be replaced with the name of the player
+	// joining or quitting.
+	// ShutdownMessage is set to chat.MessageServerDisconnect if empty.
+	JoinMessage, QuitMessage, ShutdownMessage chat.Translation
+	// StatusProvider provides the server status shown to players in the server
+	// list. By default, StatusProvider will show the server name from the Name
+	// field and the current player count and maximum players.
+	StatusProvider minecraft.ServerStatusProvider
 	// PlayerProvider is the player.Provider used for storing and loading player
 	// data. If left as nil, player data will be newly created every time a
 	// player joins the server and no data will be stored.
@@ -98,28 +104,21 @@ type Config struct {
 	Entities world.EntityRegistry
 }
 
-// Logger is used to report information and errors from a dragonfly Server. Any
-// Logger implementation may be used by passing it to the Log field in Config.
-type Logger interface {
-	world.Logger
-	session.Logger
-	Infof(format string, v ...any)
-	Fatalf(format string, v ...any)
-	Warnf(format string, v ...any)
-}
-
 // New creates a Server using fields of conf. The Server's worlds are created
 // and connections from the Server's listeners may be accepted by calling
 // Server.Listen() and Server.Accept() afterwards.
 func (conf Config) New() *Server {
 	if conf.Log == nil {
-		conf.Log = logrus.New()
+		conf.Log = slog.Default()
 	}
 	if len(conf.Listeners) == 0 {
-		conf.Log.Warnf("config: no listeners set, no connections will be accepted")
+		conf.Log.Warn("config: no listeners set, no connections will be accepted")
 	}
 	if conf.Name == "" {
 		conf.Name = "Dragonfly Server"
+	}
+	if conf.StatusProvider == nil {
+		conf.StatusProvider = statusProvider{name: conf.Name}
 	}
 	if conf.PlayerProvider == nil {
 		conf.PlayerProvider = player.NopProvider{}
@@ -136,6 +135,9 @@ func (conf Config) New() *Server {
 	if conf.MaxChunkRadius == 0 {
 		conf.MaxChunkRadius = 12
 	}
+	if conf.ShutdownMessage.Zero() {
+		conf.ShutdownMessage = chat.MessageServerDisconnect
+	}
 	if len(conf.Entities.Types()) == 0 {
 		conf.Entities = entity.DefaultRegistry
 	}
@@ -144,20 +146,30 @@ func (conf Config) New() *Server {
 			conf.Resources = append(conf.Resources, pack)
 		}
 	}
-	// Copy resources so that the slice can't be edited afterwards.
+	// Copy resources so that the slice can't be edited afterward.
 	conf.Resources = slices.Clone(conf.Resources)
 
 	srv := &Server{
 		conf:     conf,
-		incoming: make(chan *session.Session),
-		p:        make(map[uuid.UUID]*player.Player),
+		incoming: make(chan incoming),
+		p:        make(map[uuid.UUID]*onlinePlayer),
 		world:    &world.World{}, nether: &world.World{}, end: &world.World{},
 	}
+	for _, lf := range conf.Listeners {
+		l, err := lf(conf)
+		if err != nil {
+			conf.Log.Error("create listener: " + err.Error())
+		}
+		srv.listeners = append(srv.listeners, l)
+	}
+
+	world_finaliseBlockRegistry()
+	recipe_registerVanilla()
+
 	srv.world = srv.createWorld(world.Overworld, &srv.nether, &srv.end)
 	srv.nether = srv.createWorld(world.Nether, &srv.world, &srv.end)
 	srv.end = srv.createWorld(world.End, &srv.nether, &srv.world)
 
-	srv.registerTargetFunc()
 	srv.checkNetIsolation()
 
 	return srv
@@ -177,21 +189,12 @@ type UserConfig struct {
 	Server struct {
 		// Name is the name of the server as it shows up in the server list.
 		Name string
-		// ShutdownMessage is the message shown to players when the server shuts
-		// down. If empty, players will be directed to the menu screen right
-		// away.
-		ShutdownMessage string
 		// AuthEnabled controls whether players must be connected to Xbox Live
 		// in order to join the server.
 		AuthEnabled bool
-		// JoinMessage is the message that appears when a player joins the
-		// server. Leave this empty to disable it. %v is the placeholder for the
-		// username of the player
-		JoinMessage string
-		// QuitMessage is the message that appears when a player leaves the
-		// server. Leave this empty to disable it. %v is the placeholder for the
-		// username of the player
-		QuitMessage string
+		// DisableJoinQuitMessages specifies if default join and quit messages
+		// for players should be disabled.
+		DisableJoinQuitMessages bool
 	}
 	World struct {
 		// SaveData controls whether a world's data will be saved and loaded.
@@ -238,7 +241,7 @@ type UserConfig struct {
 // Config converts a UserConfig to a Config, so that it may be used for creating
 // a Server. An error is returned if creating data providers or loading
 // resources failed.
-func (uc UserConfig) Config(log Logger) (Config, error) {
+func (uc UserConfig) Config(log *slog.Logger) (Config, error) {
 	var err error
 	conf := Config{
 		Log:                     log,
@@ -247,10 +250,10 @@ func (uc UserConfig) Config(log Logger) (Config, error) {
 		AuthDisabled:            !uc.Server.AuthEnabled,
 		MaxPlayers:              uc.Players.MaxCount,
 		MaxChunkRadius:          uc.Players.MaximumChunkRadius,
-		JoinMessage:             uc.Server.JoinMessage,
-		QuitMessage:             uc.Server.QuitMessage,
-		ShutdownMessage:         uc.Server.ShutdownMessage,
 		DisableResourceBuilding: !uc.Resources.AutoBuildPack,
+	}
+	if !uc.Server.DisableJoinQuitMessages {
+		conf.JoinMessage, conf.QuitMessage = chat.MessageJoin, chat.MessageQuit
 	}
 	if uc.World.SaveData {
 		conf.WorldProvider, err = mcdb.Config{Log: log}.Open(uc.World.Folder)
@@ -290,7 +293,9 @@ func loadResources(dir string) ([]*resource.Pack, error) {
 	return packs, nil
 }
 
-// loadGenerator loads a standard world.Generator for a world.Dimension.
+// loadGenerator loads a standard world.Generator for a world.Dimension. The
+// generators returned are flat generators with grass/dirt, netherrack or end
+// stone depending on the dimension passed.
 func loadGenerator(dim world.Dimension) world.Generator {
 	switch dim {
 	case world.Overworld:
@@ -308,10 +313,7 @@ func DefaultConfig() UserConfig {
 	c := UserConfig{}
 	c.Network.Address = ":19132"
 	c.Server.Name = "Dragonfly Server"
-	c.Server.ShutdownMessage = "Server closed."
 	c.Server.AuthEnabled = true
-	c.Server.JoinMessage = "%v has joined the game"
-	c.Server.QuitMessage = "%v has left the game"
 	c.World.SaveData = true
 	c.World.Folder = "world"
 	c.Players.MaximumChunkRadius = 32
@@ -322,3 +324,13 @@ func DefaultConfig() UserConfig {
 	c.Resources.Required = false
 	return c
 }
+
+// noinspection ALL
+//
+//go:linkname recipe_registerVanilla github.com/df-mc/dragonfly/server/item/recipe.registerVanilla
+func recipe_registerVanilla()
+
+// noinspection ALL
+//
+//go:linkname world_finaliseBlockRegistry github.com/df-mc/dragonfly/server/world.finaliseBlockRegistry
+func world_finaliseBlockRegistry()

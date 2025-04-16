@@ -149,8 +149,8 @@ type MusicDiscPlay struct {
 // MusicDiscEnd is a sound played when a music disc has stopped playing in a jukebox.
 type MusicDiscEnd struct{ sound }
 
-// ItemFrameAdd is a sound played when an item is added to an item frame.
-type ItemFrameAdd struct{ sound }
+// ItemAdd is a sound played when an item is added to an item frame or campfire.
+type ItemAdd struct{ sound }
 
 // ItemFrameRemove is a sound played when an item is removed from an item frame.
 type ItemFrameRemove struct{ sound }
@@ -160,6 +160,9 @@ type ItemFrameRotate struct{ sound }
 
 // FurnaceCrackle is a sound played every one to five seconds from a furnace.
 type FurnaceCrackle struct{ sound }
+
+// CampfireCrackle is a sound played every one to five seconds from a campfire.
+type CampfireCrackle struct{ sound }
 
 // BlastFurnaceCrackle is a sound played every one to five seconds from a blast furnace.
 type BlastFurnaceCrackle struct{ sound }
@@ -179,8 +182,33 @@ type ComposterFillLayer struct{ sound }
 // ComposterReady is a sound played when a composter has produced bone meal and is ready to be collected.
 type ComposterReady struct{ sound }
 
+// PotionBrewed is a sound played when a potion is brewed.
+type PotionBrewed struct{ sound }
+
 // LecternBookPlace is a sound played when a book is placed in a lectern.
 type LecternBookPlace struct{ sound }
+
+// SignWaxed is a sound played when a sign is waxed.
+type SignWaxed struct{ sound }
+
+// WaxedSignFailedInteraction is a sound played when a player tries to interact with a waxed sign.
+type WaxedSignFailedInteraction struct{ sound }
+
+// WaxRemoved is a sound played when wax is removed from a block.
+type WaxRemoved struct{ sound }
+
+// CopperScraped is a sound played when a player scrapes a copper block to reduce its oxidation level.
+type CopperScraped struct{ sound }
+
+// DecoratedPotInserted is a sound played when an item is successfully inserted into a decorated pot.
+type DecoratedPotInserted struct {
+	sound
+	// Progress is how much of the decorated pot has been filled.
+	Progress float64
+}
+
+// DecoratedPotInsertFailed is a sound played when an item fails to be inserted into a decorated pot.
+type DecoratedPotInsertFailed struct{ sound }
 
 // sound implements the world.Sound interface.
 type sound struct{}

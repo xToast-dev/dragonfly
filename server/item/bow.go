@@ -1,8 +1,8 @@
 package item
 
 import (
-	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/df-mc/dragonfly/server/item/potion"
+	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/sound"
 	"math"
 	"time"
@@ -30,7 +30,7 @@ func (Bow) FuelInfo() FuelInfo {
 }
 
 // Release ...
-func (Bow) Release(releaser Releaser, duration time.Duration, ctx *UseContext) {
+func (Bow) Release(releaser Releaser, tx *world.Tx, ctx *UseContext, duration time.Duration) {
 	creative := releaser.GameMode().CreativeInventory()
 	ticks := duration.Milliseconds() / 50
 	if ticks < 3 {
@@ -54,11 +54,6 @@ func (Bow) Release(releaser Releaser, duration time.Duration, ctx *UseContext) {
 		return
 	}
 
-	rot := releaser.Rotation()
-	rot = cube.Rotation{-rot[0], -rot[1]}
-	if rot[0] > 180 {
-		rot[0] = 360 - rot[0]
-	}
 	var tip potion.Potion
 	if !arrow.Empty() {
 		// Arrow is empty if not found in the creative inventory.
@@ -71,7 +66,7 @@ func (Bow) Release(releaser Releaser, duration time.Duration, ctx *UseContext) {
 		if f, ok := enchant.Type().(interface{ BurnDuration() time.Duration }); ok {
 			burnDuration = f.BurnDuration()
 		}
-		if _, ok := enchant.Type().(interface{ PunchMultiplier(int, float64) float64 }); ok {
+		if _, ok := enchant.Type().(interface{ KnockBackMultiplier() float64 }); ok {
 			punchLevel = enchant.Level()
 		}
 		if p, ok := enchant.Type().(interface{ PowerDamage(int) float64 }); ok {
@@ -82,8 +77,9 @@ func (Bow) Release(releaser Releaser, duration time.Duration, ctx *UseContext) {
 		}
 	}
 
-	create := releaser.World().EntityRegistry().Config().Arrow
-	projectile := create(eyePosition(releaser), releaser.Rotation().Vec3().Mul(force*5), rot, damage, releaser, force >= 1, false, !creative && consume, punchLevel, tip)
+	create := tx.World().EntityRegistry().Config().Arrow
+	opts := world.EntitySpawnOpts{Position: eyePosition(releaser), Velocity: releaser.Rotation().Vec3().Mul(force * 5), Rotation: releaser.Rotation().Neg()}
+	projectile := tx.AddEntity(create(opts, damage, releaser, force >= 1, false, !creative && consume, punchLevel, tip))
 	if f, ok := projectile.(interface{ SetOnFire(duration time.Duration) }); ok {
 		f.SetOnFire(burnDuration)
 	}
@@ -93,8 +89,7 @@ func (Bow) Release(releaser Releaser, duration time.Duration, ctx *UseContext) {
 		ctx.Consume(arrow.Grow(-arrow.Count() + 1))
 	}
 
-	releaser.PlaySound(sound.BowShoot{})
-	releaser.World().AddEntity(projectile)
+	tx.PlaySound(releaser.Position(), sound.BowShoot{})
 }
 
 // EnchantmentValue ...

@@ -20,9 +20,12 @@ type Inventory struct {
 	h     Handler
 	slots []item.Stack
 
-	f      func(slot int, before, after item.Stack)
+	f      SlotFunc
 	canAdd func(s item.Stack, slot int) bool
 }
+
+// SlotFunc is a function called for each item changed in an Inventory.
+type SlotFunc func(slot int, before, after item.Stack)
 
 // ErrSlotOutOfRange is returned by any methods on inventory when a slot is passed which is not within the
 // range of valid values for the inventory.
@@ -32,7 +35,7 @@ var ErrSlotOutOfRange = errors.New("slot is out of range: must be in range 0 <= 
 // constructed.
 // A function may be passed which is called every time a slot is changed. The function may also be nil, if
 // nothing needs to be done.
-func New(size int, f func(slot int, before, after item.Stack)) *Inventory {
+func New(size int, f SlotFunc) *Inventory {
 	if size <= 0 {
 		panic("inventory size must be at least 1")
 	}
@@ -40,6 +43,22 @@ func New(size int, f func(slot int, before, after item.Stack)) *Inventory {
 		f = func(slot int, before, after item.Stack) {}
 	}
 	return &Inventory{h: NopHandler{}, slots: make([]item.Stack, size), f: f, canAdd: func(s item.Stack, slot int) bool { return true }}
+}
+
+// Clone copies an Inventory and returns it, calling the SlotFunc passed for any
+// slots changed in the new inventory.
+func (inv *Inventory) Clone(f SlotFunc) *Inventory {
+	if f == nil {
+		f = func(slot int, before, after item.Stack) {}
+	}
+	return &Inventory{h: NopHandler{}, slots: inv.Slots(), f: f, canAdd: func(s item.Stack, slot int) bool { return true }}
+}
+
+// SlotFunc changes the function called when a slot in the inventory is changed.
+func (inv *Inventory) SlotFunc(f SlotFunc) {
+	inv.mu.Lock()
+	defer inv.mu.Unlock()
+	inv.f = f
 }
 
 // Item attempts to obtain an item from a specific slot in the inventory. If an item was present in that slot,
@@ -218,7 +237,15 @@ func (inv *Inventory) RemoveItemFunc(n int, comparable func(stack item.Stack) bo
 		if slotIt.Empty() || !comparable(slotIt) {
 			continue
 		}
-		f := inv.setItem(slot, slotIt.Grow(-n))
+		c := slotIt.Count() - n
+
+		var f func()
+		if c <= 0 {
+			f = inv.setItem(slot, item.Stack{})
+		} else {
+			f = inv.setItem(slot, slotIt.Grow(-n))
+		}
+
 		//noinspection GoDeferInLoop
 		defer f()
 
@@ -255,6 +282,18 @@ func (inv *Inventory) ContainsItemFunc(n int, comparable func(stack item.Stack) 
 		}
 	}
 	return n <= 0
+}
+
+// Merge merges two inventories into one. The function passed is called for every slot change in the new inventory.
+func (inv *Inventory) Merge(inv2 *Inventory, f func(int, item.Stack, item.Stack)) *Inventory {
+	inv.mu.RLock()
+	defer inv.mu.RUnlock()
+	inv2.mu.RLock()
+	defer inv2.mu.RUnlock()
+
+	n := New(len(inv.slots)+len(inv2.slots), f)
+	n.slots = append(inv.slots, inv2.slots...)
+	return n
 }
 
 // Empty checks if the inventory is fully empty: It iterates over the inventory and makes sure every stack in

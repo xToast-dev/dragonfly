@@ -1,6 +1,9 @@
 package recipe
 
-import "github.com/df-mc/dragonfly/server/item"
+import (
+	"github.com/df-mc/dragonfly/server/item"
+	"github.com/df-mc/dragonfly/server/world"
+)
 
 // Recipe is implemented by all recipe types.
 type Recipe interface {
@@ -31,19 +34,74 @@ func NewShapeless(input []Item, output item.Stack, block string) Shapeless {
 	}}
 }
 
-// Smithing represents a recipe only craftable on a smithing table.
-type Smithing struct {
+// SmithingTransform represents a recipe only craftable on a smithing table.
+type SmithingTransform struct {
 	recipe
 }
 
-// NewSmithing creates a new smithing recipe and returns it. The recipe can only be crafted on the block passed in the
-// parameters. If the block given a crafting table, the recipe can also be crafted in the 2x2 crafting grid in the
-// player's inventory.
-func NewSmithing(base, addition, template Item, output item.Stack, block string) Smithing {
-	return Smithing{recipe: recipe{
+// NewSmithingTransform creates a new smithing recipe and returns it.
+func NewSmithingTransform(base, addition, template Item, output item.Stack, block string) SmithingTransform {
+	return SmithingTransform{recipe: recipe{
 		input:  []Item{base, addition, template},
 		output: []item.Stack{output},
 		block:  block,
+	}}
+}
+
+// SmithingTrim represents a recipe only craftable on a smithing table using an armour trim.
+type SmithingTrim struct {
+	recipe
+}
+
+// NewSmithingTrim creates a new smithing trim recipe and returns it. This is
+// almost identical to SmithingTransform except there is no output item.
+func NewSmithingTrim(base, addition, template Item, block string) SmithingTrim {
+	return SmithingTrim{recipe: recipe{
+		input: []Item{base, addition, template},
+		block: block,
+	}}
+}
+
+// Furnace represents a recipe only craftable in a furnace.
+type Furnace struct {
+	recipe
+}
+
+// NewFurnace creates a new furnace recipe and returns it.
+func NewFurnace(input Item, output item.Stack, block string) Furnace {
+	return Furnace{recipe: recipe{
+		input:  []Item{input},
+		output: []item.Stack{output},
+		block:  block,
+	}}
+}
+
+// PotionContainerChange is a recipe to convert a potion from one type to another, such as from a drinkable potion to a
+// splash potion, or from a splash potion to a lingering potion.
+type PotionContainerChange struct {
+	recipe
+}
+
+// NewPotionContainerChange creates a new potion container change recipe and returns it.
+func NewPotionContainerChange(input, output world.Item, reagent item.Stack) PotionContainerChange {
+	return PotionContainerChange{recipe: recipe{
+		input:  []Item{item.NewStack(input, 1), reagent},
+		output: []item.Stack{item.NewStack(output, 1)},
+		block:  "brewing_stand",
+	}}
+}
+
+// Potion is a potion mixing recipe which may be used in the brewing stand.
+type Potion struct {
+	recipe
+}
+
+// NewPotion creates a new potion recipe and returns it.
+func NewPotion(input, reagent Item, output item.Stack) Potion {
+	return Potion{recipe: recipe{
+		input:  []Item{input, reagent},
+		output: []item.Stack{output},
+		block:  "brewing_stand",
 	}}
 }
 

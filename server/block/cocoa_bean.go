@@ -6,7 +6,7 @@ import (
 	"github.com/df-mc/dragonfly/server/item"
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/go-gl/mathgl/mgl64"
-	"math/rand"
+	"math/rand/v2"
 )
 
 // CocoaBean is a crop block found in jungle biomes.
@@ -20,12 +20,12 @@ type CocoaBean struct {
 }
 
 // BoneMeal ...
-func (c CocoaBean) BoneMeal(pos cube.Pos, w *world.World) bool {
+func (c CocoaBean) BoneMeal(pos cube.Pos, tx *world.Tx) bool {
 	if c.Age == 2 {
 		return false
 	}
 	c.Age++
-	w.SetBlock(pos, c, nil)
+	tx.SetBlock(pos, c, nil)
 	return true
 }
 
@@ -35,22 +35,22 @@ func (c CocoaBean) HasLiquidDrops() bool {
 }
 
 // NeighbourUpdateTick ...
-func (c CocoaBean) NeighbourUpdateTick(pos, _ cube.Pos, w *world.World) {
+func (c CocoaBean) NeighbourUpdateTick(pos, _ cube.Pos, tx *world.Tx) {
 	var woodType WoodType
-	switch b := w.Block(pos.Side(c.Facing.Face())).(type) {
+	switch b := tx.Block(pos.Side(c.Facing.Face())).(type) {
 	case Log:
 		woodType = b.Wood
 	case Wood:
 		woodType = b.Wood
 	}
 	if woodType != JungleWood() {
-		w.SetBlock(pos, nil, nil)
+		breakBlock(c, pos, tx)
 	}
 }
 
 // UseOnBlock ...
-func (c CocoaBean) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, w *world.World, user item.User, ctx *item.UseContext) bool {
-	pos, _, used := firstReplaceable(w, pos, face, c)
+func (c CocoaBean) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, tx *world.Tx, user item.User, ctx *item.UseContext) bool {
+	pos, _, used := firstReplaceable(tx, pos, face, c)
 	if !used {
 		return false
 	}
@@ -61,16 +61,16 @@ func (c CocoaBean) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, w *wor
 
 	var woodType WoodType
 	oppositePos := pos.Side(face.Opposite())
-	if log, ok := w.Block(oppositePos).(Log); ok {
+	if log, ok := tx.Block(oppositePos).(Log); ok {
 		woodType = log.Wood
-	} else if wood, ok := w.Block(oppositePos).(Wood); ok {
+	} else if wood, ok := tx.Block(oppositePos).(Wood); ok {
 		woodType = wood.Wood
 	}
 	if woodType == JungleWood() {
 		c.Facing = face.Opposite().Direction()
 		ctx.IgnoreBBox = true
 
-		place(w, pos, c, user, ctx)
+		place(tx, pos, c, user, ctx)
 		return placed(ctx)
 	}
 
@@ -78,10 +78,10 @@ func (c CocoaBean) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, w *wor
 }
 
 // RandomTick ...
-func (c CocoaBean) RandomTick(pos cube.Pos, w *world.World, r *rand.Rand) {
-	if c.Age < 2 && r.Intn(5) == 0 {
+func (c CocoaBean) RandomTick(pos cube.Pos, tx *world.Tx, r *rand.Rand) {
+	if c.Age < 2 && r.IntN(5) == 0 {
 		c.Age++
-		w.SetBlock(pos, c, nil)
+		tx.SetBlock(pos, c, nil)
 	}
 }
 
@@ -89,7 +89,7 @@ func (c CocoaBean) RandomTick(pos cube.Pos, w *world.World, r *rand.Rand) {
 func (c CocoaBean) BreakInfo() BreakInfo {
 	return newBreakInfo(0.2, alwaysHarvestable, axeEffective, func(item.Tool, []item.Enchantment) []item.Stack {
 		if c.Age == 2 {
-			return []item.Stack{item.NewStack(c, rand.Intn(2)+2)}
+			return []item.Stack{item.NewStack(c, rand.IntN(2)+2)}
 		}
 		return []item.Stack{item.NewStack(c, 1)}
 	}).withBlastResistance(15)

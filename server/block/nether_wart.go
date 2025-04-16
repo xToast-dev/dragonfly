@@ -5,7 +5,7 @@ import (
 	"github.com/df-mc/dragonfly/server/item"
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/go-gl/mathgl/mgl64"
-	"math/rand"
+	"math/rand/v2"
 )
 
 // NetherWart is a fungus found in the Nether that is vital in the creation of potions.
@@ -23,31 +23,31 @@ func (n NetherWart) HasLiquidDrops() bool {
 }
 
 // RandomTick ...
-func (n NetherWart) RandomTick(pos cube.Pos, w *world.World, r *rand.Rand) {
+func (n NetherWart) RandomTick(pos cube.Pos, tx *world.Tx, r *rand.Rand) {
 	if n.Age < 3 && r.Float64() < 0.1 {
 		n.Age++
-		w.SetBlock(pos, n, nil)
+		tx.SetBlock(pos, n, nil)
 	}
 }
 
 // UseOnBlock ...
-func (n NetherWart) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, w *world.World, user item.User, ctx *item.UseContext) bool {
-	pos, _, used := firstReplaceable(w, pos, face, n)
+func (n NetherWart) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, tx *world.Tx, user item.User, ctx *item.UseContext) bool {
+	pos, _, used := firstReplaceable(tx, pos, face, n)
 	if !used {
 		return false
 	}
-	if _, ok := w.Block(pos.Side(cube.FaceDown)).(SoulSand); !ok {
+	if _, ok := tx.Block(pos.Side(cube.FaceDown)).(SoulSand); !ok {
 		return false
 	}
 
-	place(w, pos, n, user, ctx)
+	place(tx, pos, n, user, ctx)
 	return placed(ctx)
 }
 
 // NeighbourUpdateTick ...
-func (n NetherWart) NeighbourUpdateTick(pos, _ cube.Pos, w *world.World) {
-	if _, ok := w.Block(pos.Side(cube.FaceDown)).(SoulSand); !ok {
-		w.SetBlock(pos, nil, nil)
+func (n NetherWart) NeighbourUpdateTick(pos, _ cube.Pos, tx *world.Tx) {
+	if _, ok := tx.Block(pos.Side(cube.FaceDown)).(SoulSand); !ok {
+		breakBlock(n, pos, tx)
 	}
 }
 
@@ -55,7 +55,7 @@ func (n NetherWart) NeighbourUpdateTick(pos, _ cube.Pos, w *world.World) {
 func (n NetherWart) BreakInfo() BreakInfo {
 	return newBreakInfo(0, alwaysHarvestable, nothingEffective, func(item.Tool, []item.Enchantment) []item.Stack {
 		if n.Age == 3 {
-			return []item.Stack{item.NewStack(n, rand.Intn(3)+2)}
+			return []item.Stack{item.NewStack(n, rand.IntN(3)+2)}
 		}
 		return []item.Stack{item.NewStack(n, 1)}
 	})

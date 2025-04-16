@@ -10,7 +10,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"slices"
 )
 
@@ -22,7 +22,7 @@ const (
 )
 
 // handleEnchant handles the enchantment of an item using the CraftRecipe stack request action.
-func (h *ItemStackRequestHandler) handleEnchant(a *protocol.CraftRecipeStackRequestAction, s *Session) error {
+func (h *ItemStackRequestHandler) handleEnchant(a *protocol.CraftRecipeStackRequestAction, s *Session, tx *world.Tx, c Controllable) error {
 	// First ensure that the selected slot is not out of bounds.
 	if a.RecipeNetworkID > 2 {
 		return fmt.Errorf("invalid recipe network id: %d", a.RecipeNetworkID)
@@ -38,7 +38,7 @@ func (h *ItemStackRequestHandler) handleEnchant(a *protocol.CraftRecipeStackRequ
 	}
 
 	// Determine the available enchantments using the session's enchantment seed.
-	allCosts, allEnchants := s.determineAvailableEnchantments(s.c.World(), s.openedPos.Load(), input)
+	allCosts, allEnchants := s.determineAvailableEnchantments(tx, c, *s.openedPos.Load(), input)
 	if len(allEnchants) == 0 {
 		return fmt.Errorf("can't enchant non-enchantable item")
 	}
@@ -50,12 +50,12 @@ func (h *ItemStackRequestHandler) handleEnchant(a *protocol.CraftRecipeStackRequ
 	enchants := allEnchants[a.RecipeNetworkID]
 
 	// If we don't have infinite resources, we need to deduct Lapis Lazuli and experience.
-	if !s.c.GameMode().CreativeInventory() {
+	if !c.GameMode().CreativeInventory() {
 		// First ensure that the experience level is both underneath the requirement and the cost.
-		if s.c.ExperienceLevel() < requirement {
+		if c.ExperienceLevel() < requirement {
 			return fmt.Errorf("not enough levels to meet requirement")
 		}
-		if s.c.ExperienceLevel() < cost {
+		if c.ExperienceLevel() < cost {
 			return fmt.Errorf("not enough levels to meet cost")
 		}
 
@@ -72,31 +72,31 @@ func (h *ItemStackRequestHandler) handleEnchant(a *protocol.CraftRecipeStackRequ
 		}
 
 		// Deduct the experience and Lapis Lazuli.
-		s.c.SetExperienceLevel(s.c.ExperienceLevel() - cost)
+		c.SetExperienceLevel(c.ExperienceLevel() - cost)
 		h.setItemInSlot(protocol.StackRequestSlotInfo{
-			ContainerID: protocol.ContainerEnchantingMaterial,
-			Slot:        enchantingLapisSlot,
-		}, lapis.Grow(-cost), s)
+			Container: protocol.FullContainerName{ContainerID: protocol.ContainerEnchantingMaterial},
+			Slot:      enchantingLapisSlot,
+		}, lapis.Grow(-cost), s, tx)
 	}
 
 	// Reset the enchantment seed so different enchantments can be selected.
-	s.c.ResetEnchantmentSeed()
+	c.ResetEnchantmentSeed()
 
 	// Clear the existing input item, and apply the new item into the crafting result slot of the UI. The client will
 	// automatically move the item into the input slot.
 	h.setItemInSlot(protocol.StackRequestSlotInfo{
-		ContainerID: protocol.ContainerEnchantingInput,
-		Slot:        enchantingInputSlot,
-	}, item.Stack{}, s)
+		Container: protocol.FullContainerName{ContainerID: protocol.ContainerEnchantingInput},
+		Slot:      enchantingInputSlot,
+	}, item.Stack{}, s, tx)
 
-	return h.createResults(s, input.WithEnchantments(enchants...))
+	return h.createResults(s, tx, input.WithEnchantments(enchants...))
 }
 
 // sendEnchantmentOptions sends a list of available enchantments to the client based on the client's enchantment seed
 // and nearby bookshelves.
-func (s *Session) sendEnchantmentOptions(w *world.World, pos cube.Pos, stack item.Stack) {
+func (s *Session) sendEnchantmentOptions(tx *world.Tx, c Controllable, pos cube.Pos, stack item.Stack) {
 	// First determine the available enchantments for the given item stack.
-	selectedCosts, selectedEnchants := s.determineAvailableEnchantments(w, pos, stack)
+	selectedCosts, selectedEnchants := s.determineAvailableEnchantments(tx, c, pos, stack)
 	if len(selectedEnchants) == 0 {
 		// No available enchantments.
 		return
@@ -119,7 +119,7 @@ func (s *Session) sendEnchantmentOptions(w *world.World, pos cube.Pos, stack ite
 		// to enchanting tables only. We also only need to set the middle index of Enchantments. The other two serve
 		// an unknown purpose and can cause various unexpected issues.
 		options = append(options, protocol.EnchantmentOption{
-			Name:            enchantNames[rand.Intn(len(enchantNames))],
+			Name:            enchantNames[rand.IntN(len(enchantNames))],
 			Cost:            uint32(selectedCosts[i]),
 			RecipeNetworkID: uint32(i),
 			Enchantments: protocol.ItemEnchantments{
@@ -134,7 +134,7 @@ func (s *Session) sendEnchantmentOptions(w *world.World, pos cube.Pos, stack ite
 }
 
 // determineAvailableEnchantments returns a list of pseudo-random enchantments for the given item stack.
-func (s *Session) determineAvailableEnchantments(w *world.World, pos cube.Pos, stack item.Stack) ([]int, [][]item.Enchantment) {
+func (s *Session) determineAvailableEnchantments(tx *world.Tx, c Controllable, pos cube.Pos, stack item.Stack) ([]int, [][]item.Enchantment) {
 	// First ensure that the item is enchantable and does not already have any enchantments.
 	enchantable, ok := stack.Item().(item.Enchantable)
 	if !ok {
@@ -148,12 +148,13 @@ func (s *Session) determineAvailableEnchantments(w *world.World, pos cube.Pos, s
 
 	// Search for bookshelves around the enchanting table. Bookshelves help boost the value of the enchantments that
 	// are selected, resulting in enchantments that are rarer but also more expensive.
-	random := rand.New(rand.NewSource(s.c.EnchantmentSeed()))
-	bookshelves := searchBookshelves(w, pos)
+	seed := uint64(c.EnchantmentSeed())
+	random := rand.New(rand.NewPCG(seed, seed))
+	bookshelves := searchBookshelves(tx, pos)
 	value := enchantable.EnchantmentValue()
 
 	// Calculate the base cost, used to calculate the upper, middle, and lower level costs.
-	baseCost := random.Intn(8) + 1 + (bookshelves >> 1) + random.Intn(bookshelves+1)
+	baseCost := random.IntN(8) + 1 + (bookshelves >> 1) + random.IntN(bookshelves+1)
 
 	// Calculate the upper, middle, and lower level costs.
 	upperLevelCost := max(baseCost/3, 1)
@@ -185,7 +186,7 @@ func createEnchantments(random *rand.Rand, stack item.Stack, value, level int) [
 	randomBonus := (random.Float64() + random.Float64() - 1.0) * 0.15
 
 	// Calculate the enchantment cost and clamp it to ensure it is always at least one with triangular distribution.
-	cost := level + 1 + random.Intn(value/4+1) + random.Intn(value/4+1)
+	cost := level + 1 + random.IntN(value/4+1) + random.IntN(value/4+1)
 	cost = clamp(int(math.Round(float64(cost)+float64(cost)*randomBonus)), 1, math.MaxInt32)
 
 	// Books are applicable to all enchantments, so make sure we have a flag for them here.
@@ -231,11 +232,11 @@ func createEnchantments(random *rand.Rand, stack item.Stack, value, level int) [
 	selectedEnchants = append(selectedEnchants, enchant)
 
 	// Remove the selected enchantment from the list of available enchantments, so we don't select it again.
-	ind := sliceutil.Index(availableEnchants, enchant)
+	ind := slices.Index(availableEnchants, enchant)
 	availableEnchants = slices.Delete(availableEnchants, ind, ind+1)
 
 	// Based on the cost, select a random amount of additional enchantments.
-	for random.Intn(50) <= cost {
+	for random.IntN(50) <= cost {
 		// Ensure that we don't have any conflicting enchantments. If so, remove them from the list of available
 		// enchantments.
 		lastEnchant := selectedEnchants[len(selectedEnchants)-1]
@@ -251,7 +252,7 @@ func createEnchantments(random *rand.Rand, stack item.Stack, value, level int) [
 		selectedEnchants = append(selectedEnchants, enchant)
 
 		// Remove the selected enchantment from the list of available enchantments, so we don't select it again.
-		ind = sliceutil.Index(availableEnchants, enchant)
+		ind = slices.Index(availableEnchants, enchant)
 		availableEnchants = slices.Delete(availableEnchants, ind, ind+1)
 
 		// Halve the cost, so we have a lower chance of selecting another enchantment.
@@ -261,7 +262,7 @@ func createEnchantments(random *rand.Rand, stack item.Stack, value, level int) [
 }
 
 // searchBookshelves searches for nearby bookshelves around the position passed, and returns the amount found.
-func searchBookshelves(w *world.World, pos cube.Pos) (shelves int) {
+func searchBookshelves(tx *world.Tx, pos cube.Pos) (shelves int) {
 	for x := -1; x <= 1; x++ {
 		for z := -1; z <= 1; z++ {
 			for y := 0; y <= 1; y++ {
@@ -269,22 +270,22 @@ func searchBookshelves(w *world.World, pos cube.Pos) (shelves int) {
 					// Ignore the center block.
 					continue
 				}
-				if _, ok := w.Block(pos.Add(cube.Pos{x, y, z})).(block.Air); !ok {
+				if _, ok := tx.Block(pos.Add(cube.Pos{x, y, z})).(block.Air); !ok {
 					// There must be a one block space between the bookshelf and the player.
 					continue
 				}
 
 				// Check for a bookshelf two blocks away.
-				if _, ok := w.Block(pos.Add(cube.Pos{x * 2, y, z * 2})).(block.Bookshelf); ok {
+				if _, ok := tx.Block(pos.Add(cube.Pos{x * 2, y, z * 2})).(block.Bookshelf); ok {
 					shelves++
 				}
 				if x != 0 && z != 0 {
 					// Check for a bookshelf two blocks away on the X axis.
-					if _, ok := w.Block(pos.Add(cube.Pos{x * 2, y, z})).(block.Bookshelf); ok {
+					if _, ok := tx.Block(pos.Add(cube.Pos{x * 2, y, z})).(block.Bookshelf); ok {
 						shelves++
 					}
 					// Check for a bookshelf two blocks away on the Z axis.
-					if _, ok := w.Block(pos.Add(cube.Pos{x, y, z * 2})).(block.Bookshelf); ok {
+					if _, ok := tx.Block(pos.Add(cube.Pos{x, y, z * 2})).(block.Bookshelf); ok {
 						shelves++
 					}
 				}
@@ -306,7 +307,7 @@ func weightedRandomEnchantment(rs *rand.Rand, enchants []item.Enchantment) item.
 	for _, e := range enchants {
 		totalWeight += e.Type().Rarity().Weight()
 	}
-	r := rs.Intn(totalWeight)
+	r := rs.IntN(totalWeight)
 	for _, e := range enchants {
 		r -= e.Type().Rarity().Weight()
 		if r < 0 {

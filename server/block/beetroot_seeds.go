@@ -4,9 +4,8 @@ import (
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/df-mc/dragonfly/server/item"
 	"github.com/df-mc/dragonfly/server/world"
-	"github.com/df-mc/dragonfly/server/world/particle"
 	"github.com/go-gl/mathgl/mgl64"
-	"math/rand"
+	"math/rand/v2"
 )
 
 // BeetrootSeeds are a crop that can be harvested to craft soup or red dye.
@@ -21,30 +20,30 @@ func (BeetrootSeeds) SameCrop(c Crop) bool {
 }
 
 // BoneMeal ...
-func (b BeetrootSeeds) BoneMeal(pos cube.Pos, w *world.World) bool {
+func (b BeetrootSeeds) BoneMeal(pos cube.Pos, tx *world.Tx) bool {
 	if b.Growth == 7 {
 		return false
 	}
 	if rand.Float64() < 0.75 {
 		b.Growth++
-		w.SetBlock(pos, b, nil)
+		tx.SetBlock(pos, b, nil)
 		return true
 	}
 	return false
 }
 
 // UseOnBlock ...
-func (b BeetrootSeeds) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, w *world.World, user item.User, ctx *item.UseContext) bool {
-	pos, _, used := firstReplaceable(w, pos, face, b)
+func (b BeetrootSeeds) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, tx *world.Tx, user item.User, ctx *item.UseContext) bool {
+	pos, _, used := firstReplaceable(tx, pos, face, b)
 	if !used {
 		return false
 	}
 
-	if _, ok := w.Block(pos.Side(cube.FaceDown)).(Farmland); !ok {
+	if _, ok := tx.Block(pos.Side(cube.FaceDown)).(Farmland); !ok {
 		return false
 	}
 
-	place(w, pos, b, user, ctx)
+	place(tx, pos, b, user, ctx)
 	return placed(ctx)
 }
 
@@ -54,7 +53,7 @@ func (b BeetrootSeeds) BreakInfo() BreakInfo {
 		if b.Growth < 7 {
 			return []item.Stack{item.NewStack(b, 1)}
 		}
-		return []item.Stack{item.NewStack(item.Beetroot{}, 1), item.NewStack(b, rand.Intn(4)+1)}
+		return []item.Stack{item.NewStack(item.Beetroot{}, 1), item.NewStack(b, rand.IntN(4)+1)}
 	})
 }
 
@@ -69,13 +68,12 @@ func (b BeetrootSeeds) EncodeItem() (name string, meta int16) {
 }
 
 // RandomTick ...
-func (b BeetrootSeeds) RandomTick(pos cube.Pos, w *world.World, r *rand.Rand) {
-	if w.Light(pos) < 8 {
-		w.SetBlock(pos, nil, nil)
-		w.AddParticle(pos.Vec3Centre(), particle.BlockBreak{Block: b})
-	} else if b.Growth < 7 && r.Intn(3) > 0 && r.Float64() <= b.CalculateGrowthChance(pos, w) {
+func (b BeetrootSeeds) RandomTick(pos cube.Pos, tx *world.Tx, r *rand.Rand) {
+	if tx.Light(pos) < 8 {
+		breakBlock(b, pos, tx)
+	} else if b.Growth < 7 && r.IntN(3) > 0 && r.Float64() <= b.CalculateGrowthChance(pos, tx) {
 		b.Growth++
-		w.SetBlock(pos, b, nil)
+		tx.SetBlock(pos, b, nil)
 	}
 }
 

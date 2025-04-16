@@ -65,7 +65,7 @@ type Note struct {
 type DragonEggTeleport struct {
 	particle
 
-	// Diff is a Pos with the values being the difference from the original position to the new position.
+	// Diff is a Position with the values being the difference from the original position to the new position.
 	Diff cube.Pos
 }
 
@@ -80,6 +80,9 @@ type LavaDrip struct{ particle }
 
 // Lava is a particle that shows up randomly above lava.
 type Lava struct{ particle }
+
+// DustPlume is a particle that shows up when an item is successfully inserted into a decorated pot.
+type DustPlume struct{ particle }
 
 // particle serves as a base for all particles in this package.
 type particle struct{}

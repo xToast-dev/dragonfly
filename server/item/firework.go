@@ -5,7 +5,7 @@ import (
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/sound"
 	"github.com/go-gl/mathgl/mgl64"
-	"math/rand"
+	"math/rand/v2"
 	"time"
 )
 
@@ -19,7 +19,7 @@ type Firework struct {
 }
 
 // Use ...
-func (f Firework) Use(w *world.World, user User, ctx *UseContext) bool {
+func (f Firework) Use(tx *world.Tx, user User, ctx *UseContext) bool {
 	if g, ok := user.(interface {
 		Gliding() bool
 	}); !ok || !g.Gliding() {
@@ -28,20 +28,22 @@ func (f Firework) Use(w *world.World, user User, ctx *UseContext) bool {
 
 	pos := user.Position()
 
-	w.PlaySound(pos, sound.FireworkLaunch{})
-	create := w.EntityRegistry().Config().Firework
-	w.AddEntity(create(pos, user.Rotation(), true, f, user))
+	tx.PlaySound(pos, sound.FireworkLaunch{})
+	create := tx.World().EntityRegistry().Config().Firework
+	opts := world.EntitySpawnOpts{Position: pos, Rotation: user.Rotation()}
+	tx.AddEntity(create(opts, f, user, 1.15, 0.04, true))
 
 	ctx.SubtractFromCount(1)
 	return true
 }
 
 // UseOnBlock ...
-func (f Firework) UseOnBlock(blockPos cube.Pos, _ cube.Face, clickPos mgl64.Vec3, w *world.World, user User, ctx *UseContext) bool {
-	pos := blockPos.Vec3().Add(clickPos)
-	create := w.EntityRegistry().Config().Firework
-	w.AddEntity(create(pos, cube.Rotation{rand.Float64() * 360, 90}, false, f, user))
-	w.PlaySound(pos, sound.FireworkLaunch{})
+func (f Firework) UseOnBlock(pos cube.Pos, _ cube.Face, clickPos mgl64.Vec3, tx *world.Tx, user User, ctx *UseContext) bool {
+	fpos := pos.Vec3().Add(clickPos)
+	create := tx.World().EntityRegistry().Config().Firework
+	opts := world.EntitySpawnOpts{Position: fpos, Rotation: cube.Rotation{rand.Float64() * 360, 90}}
+	tx.AddEntity(create(opts, f, user, 1.15, 0.04, false))
+	tx.PlaySound(fpos, sound.FireworkLaunch{})
 
 	ctx.SubtractFromCount(1)
 	return true
@@ -77,7 +79,7 @@ func (f Firework) DecodeNBT(data map[string]any) any {
 
 // RandomisedDuration returns the randomised flight duration of the firework.
 func (f Firework) RandomisedDuration() time.Duration {
-	return f.Duration + time.Duration(rand.Intn(int(time.Millisecond*600)))
+	return f.Duration + time.Duration(rand.IntN(int(time.Millisecond*600)))
 }
 
 // EncodeItem ...

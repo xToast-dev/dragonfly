@@ -70,6 +70,7 @@ type Data struct {
 		PlayerPermissionsLevel int32   `nbt:"playerPermissionsLevel"`
 		Teleport               bool    `nbt:"teleport"`
 		WalkSpeed              float32 `nbt:"walkSpeed"`
+		VerticalFlySpeed       float32 `nbt:"verticalFlySpeed"`
 	} `nbt:"abilities"`
 	BonusChestEnabled              bool           `nbt:"bonusChestEnabled"`
 	BonusChestSpawned              bool           `nbt:"bonusChestSpawned"`
@@ -142,6 +143,11 @@ type Data struct {
 	NaturalGeneration              bool           `nbt:"naturalgeneration"`
 	ProjectilesCanBreakBlocks      bool           `nbt:"projectilescanbreakblocks"`
 	ShowRecipeMessages             bool           `nbt:"showrecipemessages"`
+	IsHardcore                     bool           `nbt:"IsHardcore"`
+	ShowDaysPlayed                 bool           `nbt:"showdaysplayed"`
+	TNTExplosionDropDecay          bool           `nbt:"tntexplosiondropdecay"`
+	HasUncompleteWorldFileOnDisk   bool           `nbt:"HasUncompleteWorldFileOnDisk"`
+	PlayerHasDied                  bool           `nbt:"PlayerHasDied"`
 }
 
 // FillDefault fills out d with all the default level.dat values.
@@ -155,6 +161,7 @@ func (d *Data) FillDefault() {
 	d.Abilities.OpenContainers = true
 	d.Abilities.PlayerPermissionsLevel = 1
 	d.Abilities.WalkSpeed = 0.1
+	d.Abilities.VerticalFlySpeed = 1.0
 	d.BaseGameVersion = "*"
 	d.CommandBlockOutput = true
 	d.CommandBlocksEnabled = true

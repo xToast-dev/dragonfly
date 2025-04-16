@@ -7,7 +7,7 @@ import (
 	"github.com/df-mc/dragonfly/server/world"
 	"github.com/df-mc/dragonfly/server/world/sound"
 	"github.com/go-gl/mathgl/mgl64"
-	"math/rand"
+	"math/rand/v2"
 	"time"
 )
 
@@ -20,13 +20,13 @@ type BlastFurnace struct {
 	*smelter
 
 	// Facing is the direction the blast furnace is facing.
-	Facing cube.Face
+	Facing cube.Direction
 	// Lit is true if the blast furnace is lit.
 	Lit bool
 }
 
 // NewBlastFurnace creates a new initialised blast furnace. The smelter is properly initialised.
-func NewBlastFurnace(face cube.Face) BlastFurnace {
+func NewBlastFurnace(face cube.Direction) BlastFurnace {
 	return BlastFurnace{
 		Facing:  face,
 		smelter: newSmelter(),
@@ -34,15 +34,15 @@ func NewBlastFurnace(face cube.Face) BlastFurnace {
 }
 
 // Tick is called to check if the blast furnace should update and start or stop smelting.
-func (b BlastFurnace) Tick(_ int64, pos cube.Pos, w *world.World) {
+func (b BlastFurnace) Tick(_ int64, pos cube.Pos, tx *world.Tx) {
 	if b.Lit && rand.Float64() <= 0.016 { // Every three or so seconds.
-		w.PlaySound(pos.Vec3Centre(), sound.BlastFurnaceCrackle{})
+		tx.PlaySound(pos.Vec3Centre(), sound.BlastFurnaceCrackle{})
 	}
 	if lit := b.smelter.tickSmelting(time.Second*5, time.Millisecond*200, b.Lit, func(i item.SmeltInfo) bool {
 		return i.Ores
 	}); b.Lit != lit {
 		b.Lit = lit
-		w.SetBlock(pos, b, nil)
+		tx.SetBlock(pos, b, nil)
 	}
 }
 
@@ -60,26 +60,30 @@ func (b BlastFurnace) EncodeBlock() (name string, properties map[string]interfac
 }
 
 // UseOnBlock ...
-func (b BlastFurnace) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, w *world.World, user item.User, ctx *item.UseContext) bool {
-	pos, _, used := firstReplaceable(w, pos, face, b)
+func (b BlastFurnace) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, tx *world.Tx, user item.User, ctx *item.UseContext) bool {
+	pos, _, used := firstReplaceable(tx, pos, face, b)
 	if !used {
 		return false
 	}
 
-	place(w, pos, NewBlastFurnace(user.Rotation().Direction().Face().Opposite()), user, ctx)
+	place(tx, pos, NewBlastFurnace(user.Rotation().Direction().Opposite()), user, ctx)
 	return placed(ctx)
 }
 
 // BreakInfo ...
 func (b BlastFurnace) BreakInfo() BreakInfo {
 	xp := b.Experience()
-	return newBreakInfo(3.5, alwaysHarvestable, pickaxeEffective, oneOf(b)).withXPDropRange(xp, xp)
+	return newBreakInfo(3.5, alwaysHarvestable, pickaxeEffective, oneOf(b)).withXPDropRange(xp, xp).withBreakHandler(func(pos cube.Pos, tx *world.Tx, u item.User) {
+		for _, i := range b.Inventory(tx, pos).Clear() {
+			dropItem(tx, i, pos.Vec3())
+		}
+	})
 }
 
 // Activate ...
-func (b BlastFurnace) Activate(pos cube.Pos, _ cube.Face, _ *world.World, u item.User, _ *item.UseContext) bool {
+func (b BlastFurnace) Activate(pos cube.Pos, _ cube.Face, tx *world.Tx, u item.User, _ *item.UseContext) bool {
 	if opener, ok := u.(ContainerOpener); ok {
-		opener.OpenBlockContainer(pos)
+		opener.OpenBlockContainer(pos, tx)
 		return true
 	}
 	return false
@@ -97,7 +101,7 @@ func (b BlastFurnace) EncodeNBT() map[string]interface{} {
 		"CookTime":     int16(cook.Milliseconds() / 50),
 		"BurnDuration": int16(maximum.Milliseconds() / 50),
 		"StoredXPInt":  int16(b.Experience()),
-		"Items":        nbtconv.InvToNBT(b.Inventory()),
+		"Items":        nbtconv.InvToNBT(b.inventory),
 		"id":           "BlastFurnace",
 	}
 }
@@ -116,13 +120,13 @@ func (b BlastFurnace) DecodeNBT(data map[string]interface{}) interface{} {
 	b.Lit = lit
 	b.setExperience(xp)
 	b.setDurations(remaining, maximum, cook)
-	nbtconv.InvFromNBT(b.Inventory(), nbtconv.Slice(data, "Items"))
+	nbtconv.InvFromNBT(b.inventory, nbtconv.Slice(data, "Items"))
 	return b
 }
 
 // allBlastFurnaces ...
 func allBlastFurnaces() (furnaces []world.Block) {
-	for _, face := range cube.HorizontalFaces() {
+	for _, face := range cube.Directions() {
 		furnaces = append(furnaces, BlastFurnace{Facing: face})
 		furnaces = append(furnaces, BlastFurnace{Facing: face, Lit: true})
 	}

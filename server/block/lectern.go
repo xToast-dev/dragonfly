@@ -20,7 +20,7 @@ type Lectern struct {
 	sourceWaterDisplacer
 
 	// Facing represents the direction the Lectern is facing.
-	Facing cube.Face
+	Facing cube.Direction
 	// Book is the book currently held by the Lectern.
 	Book item.Stack
 	// Page is the page the Lectern is currently on in the book.
@@ -38,7 +38,7 @@ func (Lectern) FuelInfo() item.FuelInfo {
 }
 
 // SideClosed ...
-func (Lectern) SideClosed(cube.Pos, cube.Pos, *world.World) bool {
+func (Lectern) SideClosed(cube.Pos, cube.Pos, *world.Tx) bool {
 	return false
 }
 
@@ -48,17 +48,17 @@ func (l Lectern) BreakInfo() BreakInfo {
 	if !l.Book.Empty() {
 		d = append(d, l.Book)
 	}
-	return newBreakInfo(2, alwaysHarvestable, axeEffective, simpleDrops(d...))
+	return newBreakInfo(2.5, alwaysHarvestable, axeEffective, simpleDrops(d...))
 }
 
 // UseOnBlock ...
-func (l Lectern) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, w *world.World, user item.User, ctx *item.UseContext) (used bool) {
-	pos, _, used = firstReplaceable(w, pos, face, l)
+func (l Lectern) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, tx *world.Tx, user item.User, ctx *item.UseContext) (used bool) {
+	pos, _, used = firstReplaceable(tx, pos, face, l)
 	if !used {
 		return false
 	}
-	l.Facing = user.Rotation().Direction().Face().Opposite()
-	place(w, pos, l, user, ctx)
+	l.Facing = user.Rotation().Direction().Opposite()
+	place(tx, pos, l, user, ctx)
 	return placed(ctx)
 }
 
@@ -72,9 +72,12 @@ type readableBook interface {
 }
 
 // Activate ...
-func (l Lectern) Activate(pos cube.Pos, _ cube.Face, w *world.World, u item.User, ctx *item.UseContext) bool {
+func (l Lectern) Activate(pos cube.Pos, _ cube.Face, tx *world.Tx, u item.User, ctx *item.UseContext) bool {
 	if !l.Book.Empty() {
-		// We can't put a book on the lectern if it's full.
+		if opener, ok := u.(ContainerOpener); ok {
+			opener.OpenBlockContainer(pos, tx)
+			return true
+		}
 		return false
 	}
 
@@ -85,29 +88,29 @@ func (l Lectern) Activate(pos cube.Pos, _ cube.Face, w *world.World, u item.User
 	}
 
 	l.Book, l.Page = held, 0
-	w.SetBlock(pos, l, nil)
+	tx.SetBlock(pos, l, nil)
 
-	w.PlaySound(pos.Vec3Centre(), sound.LecternBookPlace{})
+	tx.PlaySound(pos.Vec3Centre(), sound.LecternBookPlace{})
 	ctx.SubtractFromCount(1)
 	return true
 }
 
 // Punch ...
-func (l Lectern) Punch(pos cube.Pos, _ cube.Face, w *world.World, _ item.User) {
+func (l Lectern) Punch(pos cube.Pos, _ cube.Face, tx *world.Tx, _ item.User) {
 	if l.Book.Empty() {
 		// We can't remove a book from the lectern if there isn't one.
 		return
 	}
 
-	dropItem(w, l.Book, pos.Side(cube.FaceUp).Vec3Middle())
+	dropItem(tx, l.Book, pos.Side(cube.FaceUp).Vec3Middle())
 
 	l.Book = item.Stack{}
-	w.SetBlock(pos, l, nil)
-	w.PlaySound(pos.Vec3Centre(), sound.Attack{})
+	tx.SetBlock(pos, l, nil)
+	tx.PlaySound(pos.Vec3Centre(), sound.Attack{})
 }
 
 // TurnPage updates the page the lectern is currently on to the page given.
-func (l Lectern) TurnPage(pos cube.Pos, w *world.World, page int) error {
+func (l Lectern) TurnPage(pos cube.Pos, tx *world.Tx, page int) error {
 	if page == l.Page {
 		// We're already on the correct page, so we don't need to do anything.
 		return nil
@@ -119,7 +122,7 @@ func (l Lectern) TurnPage(pos cube.Pos, w *world.World, page int) error {
 		return fmt.Errorf("page number %d is out of bounds", page)
 	}
 	l.Page = page
-	w.SetBlock(pos, l, nil)
+	tx.SetBlock(pos, l, nil)
 	return nil
 }
 
@@ -159,7 +162,7 @@ func (l Lectern) EncodeBlock() (string, map[string]any) {
 
 // allLecterns ...
 func allLecterns() (lecterns []world.Block) {
-	for _, f := range cube.HorizontalFaces() {
+	for _, f := range cube.Directions() {
 		lecterns = append(lecterns, Lectern{Facing: f})
 	}
 	return

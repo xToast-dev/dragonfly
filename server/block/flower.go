@@ -5,9 +5,8 @@ import (
 	"github.com/df-mc/dragonfly/server/entity/effect"
 	"github.com/df-mc/dragonfly/server/item"
 	"github.com/df-mc/dragonfly/server/world"
-	"github.com/df-mc/dragonfly/server/world/particle"
 	"github.com/go-gl/mathgl/mgl64"
-	"math/rand"
+	"math/rand/v2"
 	"time"
 )
 
@@ -22,28 +21,28 @@ type Flower struct {
 }
 
 // EntityInside ...
-func (f Flower) EntityInside(_ cube.Pos, _ *world.World, e world.Entity) {
+func (f Flower) EntityInside(_ cube.Pos, _ *world.Tx, e world.Entity) {
 	if f.Type == WitherRose() {
 		if living, ok := e.(interface {
 			AddEffect(effect.Effect)
 		}); ok {
-			living.AddEffect(effect.New(effect.Wither{}, 1, 2*time.Second))
+			living.AddEffect(effect.New(effect.Wither, 1, 2*time.Second))
 		}
 	}
 }
 
 // BoneMeal ...
-func (f Flower) BoneMeal(pos cube.Pos, w *world.World) (success bool) {
+func (f Flower) BoneMeal(pos cube.Pos, tx *world.Tx) (success bool) {
 	if f.Type == WitherRose() {
 		return
 	}
 
 	for i := 0; i < 8; i++ {
-		p := pos.Add(cube.Pos{rand.Intn(7) - 3, rand.Intn(3) - 1, rand.Intn(7) - 3})
-		if _, ok := w.Block(p).(Air); !ok {
+		p := pos.Add(cube.Pos{rand.IntN(7) - 3, rand.IntN(3) - 1, rand.IntN(7) - 3})
+		if _, ok := tx.Block(p).(Air); !ok {
 			continue
 		}
-		if _, ok := w.Block(p.Side(cube.FaceDown)).(Grass); !ok {
+		if _, ok := tx.Block(p.Side(cube.FaceDown)).(Grass); !ok {
 			continue
 		}
 		flowerType := f.Type
@@ -54,32 +53,27 @@ func (f Flower) BoneMeal(pos cube.Pos, w *world.World) (success bool) {
 				flowerType = Dandelion()
 			}
 		}
-		w.SetBlock(p, Flower{Type: flowerType}, nil)
+		tx.SetBlock(p, Flower{Type: flowerType}, nil)
 		success = true
 	}
 	return
 }
 
 // NeighbourUpdateTick ...
-func (f Flower) NeighbourUpdateTick(pos, _ cube.Pos, w *world.World) {
-	if !supportsVegetation(f, w.Block(pos.Side(cube.FaceDown))) {
-		w.SetBlock(pos, nil, nil)
-		w.AddParticle(pos.Vec3Centre(), particle.BlockBreak{Block: f})
-		dropItem(w, item.NewStack(f, 1), pos.Vec3Centre())
+func (f Flower) NeighbourUpdateTick(pos, _ cube.Pos, tx *world.Tx) {
+	if !supportsVegetation(f, tx.Block(pos.Side(cube.FaceDown))) {
+		breakBlock(f, pos, tx)
 	}
 }
 
 // UseOnBlock ...
-func (f Flower) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, w *world.World, user item.User, ctx *item.UseContext) bool {
-	pos, _, used := firstReplaceable(w, pos, face, f)
-	if !used {
-		return false
-	}
-	if !supportsVegetation(f, w.Block(pos.Side(cube.FaceDown))) {
+func (f Flower) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, tx *world.Tx, user item.User, ctx *item.UseContext) bool {
+	pos, _, used := firstReplaceable(tx, pos, face, f)
+	if !used || !supportsVegetation(f, tx.Block(pos.Side(cube.FaceDown))) {
 		return false
 	}
 
-	place(w, pos, f, user, ctx)
+	place(tx, pos, f, user, ctx)
 	return placed(ctx)
 }
 
@@ -105,22 +99,12 @@ func (Flower) CompostChance() float64 {
 
 // EncodeItem ...
 func (f Flower) EncodeItem() (name string, meta int16) {
-	if f.Type == Dandelion() {
-		return "minecraft:yellow_flower", 0
-	} else if f.Type == WitherRose() {
-		return "minecraft:wither_rose", 0
-	}
-	return "minecraft:red_flower", int16(f.Type.Uint8() - 1)
+	return "minecraft:" + f.Type.String(), 0
 }
 
 // EncodeBlock ...
 func (f Flower) EncodeBlock() (string, map[string]any) {
-	if f.Type == Dandelion() {
-		return "minecraft:yellow_flower", nil
-	} else if f.Type == WitherRose() {
-		return "minecraft:wither_rose", nil
-	}
-	return "minecraft:red_flower", map[string]any{"flower_type": f.Type.String()}
+	return "minecraft:" + f.Type.String(), nil
 }
 
 // allFlowers ...

@@ -2,13 +2,13 @@ package session
 
 import (
 	"fmt"
+	"github.com/df-mc/dragonfly/server/world"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 
 	"github.com/df-mc/dragonfly/server/block"
 	"github.com/df-mc/dragonfly/server/entity"
 	"github.com/df-mc/dragonfly/server/item"
-	"github.com/go-gl/mathgl/mgl64"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 )
 
@@ -20,24 +20,24 @@ const (
 )
 
 // handleGrindstoneCraft handles a CraftGrindstoneRecipe stack request action made using a grindstone.
-func (h *ItemStackRequestHandler) handleGrindstoneCraft(s *Session) error {
+func (h *ItemStackRequestHandler) handleGrindstoneCraft(s *Session, tx *world.Tx, c Controllable) error {
 	// First check if there actually is a grindstone opened.
 	if !s.containerOpened.Load() {
 		return fmt.Errorf("no grindstone container opened")
 	}
-	if _, ok := s.c.World().Block(s.openedPos.Load()).(block.Grindstone); !ok {
+	if _, ok := tx.Block(*s.openedPos.Load()).(block.Grindstone); !ok {
 		return fmt.Errorf("no grindstone container opened")
 	}
 
 	// Next, get both input items and ensure they are comparable.
 	firstInput, _ := h.itemInSlot(protocol.StackRequestSlotInfo{
-		ContainerID: protocol.ContainerGrindstoneInput,
-		Slot:        grindstoneFirstInputSlot,
-	}, s)
+		Container: protocol.FullContainerName{ContainerID: protocol.ContainerGrindstoneInput},
+		Slot:      grindstoneFirstInputSlot,
+	}, s, tx)
 	secondInput, _ := h.itemInSlot(protocol.StackRequestSlotInfo{
-		ContainerID: protocol.ContainerGrindstoneAdditional,
-		Slot:        grindstoneSecondInputSlot,
-	}, s)
+		Container: protocol.FullContainerName{ContainerID: protocol.ContainerGrindstoneAdditional},
+		Slot:      grindstoneSecondInputSlot,
+	}, s, tx)
 	if firstInput.Empty() && secondInput.Empty() {
 		return fmt.Errorf("input item(s) are empty")
 	}
@@ -47,6 +47,15 @@ func (h *ItemStackRequestHandler) handleGrindstoneCraft(s *Session) error {
 
 	resultStack := nonZeroItem(firstInput, secondInput)
 	if !firstInput.Empty() && !secondInput.Empty() {
+		name, meta := firstInput.Item().EncodeItem()
+		name2, meta2 := secondInput.Item().EncodeItem()
+		if name != name2 || meta != meta2 {
+			return fmt.Errorf("input items must be the same type")
+		}
+		if _, ok := firstInput.Item().(item.Durable); !ok {
+			return fmt.Errorf("input items must be durable")
+		}
+
 		// We add the enchantments to the result stack in order to calculate the gained experience. These enchantments
 		// are stripped when creating the result.
 		resultStack = firstInput.WithEnchantments(secondInput.Enchantments()...)
@@ -58,21 +67,19 @@ func (h *ItemStackRequestHandler) handleGrindstoneCraft(s *Session) error {
 		resultStack = resultStack.WithDurability(firstDurability + secondDurability + maxDurability*5/100)
 	}
 
-	w := s.c.World()
-	for _, o := range entity.NewExperienceOrbs(entity.EyePosition(s.c), experienceFromEnchantments(resultStack)) {
-		o.SetVelocity(mgl64.Vec3{(rand.Float64()*0.2 - 0.1) * 2, rand.Float64() * 0.4, (rand.Float64()*0.2 - 0.1) * 2})
-		w.AddEntity(o)
+	for _, o := range entity.NewExperienceOrbs(entity.EyePosition(c), experienceFromEnchantments(resultStack)) {
+		tx.AddEntity(o)
 	}
 
 	h.setItemInSlot(protocol.StackRequestSlotInfo{
-		ContainerID: protocol.ContainerGrindstoneInput,
-		Slot:        grindstoneFirstInputSlot,
-	}, item.Stack{}, s)
+		Container: protocol.FullContainerName{ContainerID: protocol.ContainerGrindstoneInput},
+		Slot:      grindstoneFirstInputSlot,
+	}, item.Stack{}, s, tx)
 	h.setItemInSlot(protocol.StackRequestSlotInfo{
-		ContainerID: protocol.ContainerGrindstoneAdditional,
-		Slot:        grindstoneSecondInputSlot,
-	}, item.Stack{}, s)
-	return h.createResults(s, stripPossibleEnchantments(resultStack))
+		Container: protocol.FullContainerName{ContainerID: protocol.ContainerGrindstoneAdditional},
+		Slot:      grindstoneSecondInputSlot,
+	}, item.Stack{}, s, tx)
+	return h.createResults(s, tx, stripPossibleEnchantments(resultStack))
 }
 
 // curseEnchantment represents an enchantment that may be a curse enchantment.
@@ -96,7 +103,7 @@ func experienceFromEnchantments(stack item.Stack) int {
 	}
 
 	minExperience := int(math.Ceil(float64(totalCost) / 2))
-	return minExperience + rand.Intn(minExperience)
+	return minExperience + rand.IntN(minExperience)
 }
 
 // stripPossibleEnchantments strips all enchantments possible, excluding curses.
@@ -107,7 +114,7 @@ func stripPossibleEnchantments(stack item.Stack) item.Stack {
 		}
 		stack = stack.WithoutEnchantments(enchant.Type())
 	}
-	return stack
+	return stack.WithAnvilCost(0)
 }
 
 // nonZeroItem returns the item.Stack that exists out of two input items. The function expects at least one of the

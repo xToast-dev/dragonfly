@@ -19,6 +19,35 @@ type Jukebox struct {
 	Item item.Stack
 }
 
+// InsertItem ...
+func (j Jukebox) InsertItem(h Hopper, pos cube.Pos, tx *world.Tx) bool {
+	if !j.Item.Empty() {
+		return false
+	}
+
+	for sourceSlot, sourceStack := range h.inventory.Slots() {
+		if sourceStack.Empty() {
+			continue
+		}
+
+		if m, ok := sourceStack.Item().(item.MusicDisc); ok {
+			j.Item = sourceStack
+			tx.SetBlock(pos, j, nil)
+			_ = h.inventory.SetItem(sourceSlot, sourceStack.Grow(-1))
+			tx.PlaySound(pos.Vec3Centre(), sound.MusicDiscPlay{DiscType: m.DiscType})
+			return true
+		}
+	}
+
+	return false
+}
+
+// ExtractItem ...
+func (j Jukebox) ExtractItem(_ Hopper, _ cube.Pos, _ *world.Tx) bool {
+	// TODO: This functionality requires redstone to be implemented.
+	return false
+}
+
 // FuelInfo ...
 func (j Jukebox) FuelInfo() item.FuelInfo {
 	return newFuelInfo(time.Second * 15)
@@ -26,13 +55,10 @@ func (j Jukebox) FuelInfo() item.FuelInfo {
 
 // BreakInfo ...
 func (j Jukebox) BreakInfo() BreakInfo {
-	d := []item.Stack{item.NewStack(Jukebox{}, 1)}
-	if !j.Item.Empty() {
-		d = append(d, j.Item)
-	}
-	return newBreakInfo(0.8, alwaysHarvestable, axeEffective, simpleDrops(d...)).withBreakHandler(func(pos cube.Pos, w *world.World, u item.User) {
+	return newBreakInfo(2, alwaysHarvestable, axeEffective, oneOf(Jukebox{})).withBlastResistance(30).withBreakHandler(func(pos cube.Pos, tx *world.Tx, u item.User) {
 		if _, hasDisc := j.Disc(); hasDisc {
-			w.PlaySound(pos.Vec3Centre(), sound.MusicDiscEnd{})
+			dropItem(tx, j.Item, pos.Vec3())
+			tx.PlaySound(pos.Vec3Centre(), sound.MusicDiscEnd{})
 		}
 	})
 }
@@ -45,22 +71,22 @@ type jukeboxUser interface {
 }
 
 // Activate ...
-func (j Jukebox) Activate(pos cube.Pos, _ cube.Face, w *world.World, u item.User, ctx *item.UseContext) bool {
+func (j Jukebox) Activate(pos cube.Pos, _ cube.Face, tx *world.Tx, u item.User, ctx *item.UseContext) bool {
 	if _, hasDisc := j.Disc(); hasDisc {
-		dropItem(w, j.Item, pos.Side(cube.FaceUp).Vec3Middle())
+		dropItem(tx, j.Item, pos.Side(cube.FaceUp).Vec3Middle())
 
 		j.Item = item.Stack{}
-		w.SetBlock(pos, j, nil)
-		w.PlaySound(pos.Vec3Centre(), sound.MusicDiscEnd{})
+		tx.SetBlock(pos, j, nil)
+		tx.PlaySound(pos.Vec3Centre(), sound.MusicDiscEnd{})
 	} else if held, _ := u.HeldItems(); !held.Empty() {
 		if m, ok := held.Item().(item.MusicDisc); ok {
 			j.Item = held
 
-			w.SetBlock(pos, j, nil)
-			w.PlaySound(pos.Vec3Centre(), sound.MusicDiscEnd{})
+			tx.SetBlock(pos, j, nil)
+			tx.PlaySound(pos.Vec3Centre(), sound.MusicDiscEnd{})
 			ctx.SubtractFromCount(1)
 
-			w.PlaySound(pos.Vec3Centre(), sound.MusicDiscPlay{DiscType: m.DiscType})
+			tx.PlaySound(pos.Vec3Centre(), sound.MusicDiscPlay{DiscType: m.DiscType})
 			if u, ok := u.(jukeboxUser); ok {
 				u.SendJukeboxPopup(fmt.Sprintf("Now playing: %v - %v", m.DiscType.Author(), m.DiscType.DisplayName()))
 			}

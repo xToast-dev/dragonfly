@@ -26,7 +26,7 @@ func (w WoodFence) BreakInfo() BreakInfo {
 }
 
 // SideClosed ...
-func (WoodFence) SideClosed(cube.Pos, cube.Pos, *world.World) bool {
+func (WoodFence) SideClosed(cube.Pos, cube.Pos, *world.Tx) bool {
 	return false
 }
 
@@ -39,7 +39,10 @@ func (w WoodFence) FlammabilityInfo() FlammabilityInfo {
 }
 
 // FuelInfo ...
-func (WoodFence) FuelInfo() item.FuelInfo {
+func (w WoodFence) FuelInfo() item.FuelInfo {
+	if !w.Wood.Flammable() {
+		return item.FuelInfo{}
+	}
 	return newFuelInfo(time.Second * 15)
 }
 

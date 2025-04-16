@@ -40,6 +40,7 @@ func init() {
 	world.RegisterItem(Compass{})
 	world.RegisterItem(Cookie{})
 	world.RegisterItem(CopperIngot{})
+	world.RegisterItem(Crossbow{})
 	world.RegisterItem(Diamond{})
 	world.RegisterItem(DiscFragment{})
 	world.RegisterItem(DragonBreath{})
@@ -104,6 +105,7 @@ func init() {
 	world.RegisterItem(RawGold{})
 	world.RegisterItem(RawIron{})
 	world.RegisterItem(RecoveryCompass{})
+	world.RegisterItem(ResinBrick{})
 	world.RegisterItem(RottenFlesh{})
 	world.RegisterItem(Salmon{Cooked: true})
 	world.RegisterItem(Salmon{})
@@ -116,6 +118,7 @@ func init() {
 	world.RegisterItem(Spyglass{})
 	world.RegisterItem(Stick{})
 	world.RegisterItem(Sugar{})
+	world.RegisterItem(Totem{})
 	world.RegisterItem(TropicalFish{})
 	world.RegisterItem(TurtleShell{})
 	world.RegisterItem(WarpedFungusOnAStick{})
@@ -126,6 +129,9 @@ func init() {
 		world.RegisterItem(Chestplate{Tier: t})
 		world.RegisterItem(Leggings{Tier: t})
 		world.RegisterItem(Boots{Tier: t})
+	}
+	for _, t := range SmithingTemplates() {
+		world.RegisterItem(SmithingTemplate{Template: t})
 	}
 	for _, pattern := range BannerPatterns() {
 		world.RegisterItem(BannerPattern{Type: pattern})

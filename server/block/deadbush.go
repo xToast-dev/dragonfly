@@ -4,9 +4,8 @@ import (
 	"github.com/df-mc/dragonfly/server/block/cube"
 	"github.com/df-mc/dragonfly/server/item"
 	"github.com/df-mc/dragonfly/server/world"
-	"github.com/df-mc/dragonfly/server/world/particle"
 	"github.com/go-gl/mathgl/mgl64"
-	"math/rand"
+	"math/rand/v2"
 )
 
 // DeadBush is a transparent block in the form of an aesthetic plant.
@@ -18,32 +17,25 @@ type DeadBush struct {
 }
 
 // NeighbourUpdateTick ...
-func (d DeadBush) NeighbourUpdateTick(pos, _ cube.Pos, w *world.World) {
-	if !supportsVegetation(d, w.Block(pos.Side(cube.FaceDown))) {
-		w.SetBlock(pos, nil, nil)
-		w.AddParticle(pos.Vec3Centre(), particle.BlockBreak{Block: d})
-		if amount := rand.Intn(3); amount != 0 {
-			dropItem(w, item.NewStack(item.Stick{}, amount), pos.Vec3Centre())
-		}
+func (d DeadBush) NeighbourUpdateTick(pos, _ cube.Pos, tx *world.Tx) {
+	if !supportsVegetation(d, tx.Block(pos.Side(cube.FaceDown))) {
+		breakBlock(d, pos, tx)
 	}
 }
 
 // UseOnBlock ...
-func (d DeadBush) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, w *world.World, user item.User, ctx *item.UseContext) bool {
-	pos, _, used := firstReplaceable(w, pos, face, d)
-	if !used {
-		return false
-	}
-	if !supportsVegetation(d, w.Block(pos.Side(cube.FaceDown))) {
+func (d DeadBush) UseOnBlock(pos cube.Pos, face cube.Face, _ mgl64.Vec3, tx *world.Tx, user item.User, ctx *item.UseContext) bool {
+	pos, _, used := firstReplaceable(tx, pos, face, d)
+	if !used || !supportsVegetation(d, tx.Block(pos.Side(cube.FaceDown))) {
 		return false
 	}
 
-	place(w, pos, d, user, ctx)
+	place(tx, pos, d, user, ctx)
 	return placed(ctx)
 }
 
 // SideClosed ...
-func (d DeadBush) SideClosed(cube.Pos, cube.Pos, *world.World) bool {
+func (d DeadBush) SideClosed(cube.Pos, cube.Pos, *world.Tx) bool {
 	return false
 }
 
@@ -63,7 +55,7 @@ func (d DeadBush) BreakInfo() BreakInfo {
 		if t.ToolType() == item.TypeShears {
 			return []item.Stack{item.NewStack(d, 1)}
 		}
-		if amount := rand.Intn(3); amount != 0 {
+		if amount := rand.IntN(3); amount != 0 {
 			return []item.Stack{item.NewStack(item.Stick{}, amount)}
 		}
 		return nil

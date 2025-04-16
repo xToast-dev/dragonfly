@@ -26,8 +26,8 @@ func (s Sand) SoilFor(block world.Block) bool {
 }
 
 // NeighbourUpdateTick ...
-func (s Sand) NeighbourUpdateTick(pos, _ cube.Pos, w *world.World) {
-	s.fall(s, pos, w)
+func (s Sand) NeighbourUpdateTick(pos, _ cube.Pos, tx *world.Tx) {
+	s.fall(s, pos, tx)
 }
 
 // BreakInfo ...
@@ -43,7 +43,7 @@ func (Sand) SmeltInfo() item.SmeltInfo {
 // EncodeItem ...
 func (s Sand) EncodeItem() (name string, meta int16) {
 	if s.Red {
-		return "minecraft:sand", 1
+		return "minecraft:red_sand", 0
 	}
 	return "minecraft:sand", 0
 }
@@ -51,7 +51,7 @@ func (s Sand) EncodeItem() (name string, meta int16) {
 // EncodeBlock ...
 func (s Sand) EncodeBlock() (string, map[string]any) {
 	if s.Red {
-		return "minecraft:sand", map[string]any{"sand_type": "red"}
+		return "minecraft:red_sand", nil
 	}
-	return "minecraft:sand", map[string]any{"sand_type": "normal"}
+	return "minecraft:sand", nil
 }
